@@ -1,16 +1,10 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, Trash2, Copy, Download } from "lucide-react";
+import { ChevronLeft, Eye, Trash2, Copy, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -30,6 +24,7 @@ const DocumentDetailPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [summaryType, setSummaryType] = useState<SummaryType>("concise");
+  const [showSummary, setShowSummary] = useState(false);
   const [summarizing, setSummarizing] = useState(false);
 
   const { data: doc, isLoading: docLoading } = useQuery({
@@ -45,7 +40,7 @@ const DocumentDetailPage = () => {
   } = useQuery({
     queryKey: ["summary", id],
     queryFn: () => fetchSummary(id!),
-    enabled: !!id && doc?.status === "summarized",
+    enabled: !!id && showSummary,
     retry: false,
   });
 
@@ -54,6 +49,7 @@ const DocumentDetailPage = () => {
     onMutate: () => setSummarizing(true),
     onSuccess: () => {
       setSummarizing(false);
+      setShowSummary(true);
       queryClient.invalidateQueries({ queryKey: ["document", id] });
       refetchSummary();
       toast.success("Summary generated!");
@@ -126,6 +122,7 @@ const DocumentDetailPage = () => {
     );
   }
 
+  // Your backend returns createdAt (camelCase)
   const formatDate = (d: string) => {
     try {
       return format(new Date(d), "dd.MM.yyyy HH:mm");
@@ -134,36 +131,45 @@ const DocumentDetailPage = () => {
     }
   };
 
-  const isSummarized = doc.status === "summarized";
+  const isSummarized = doc.status === "summarized" || showSummary;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <AppHeader />
       <main className="flex-1 px-8 py-6 max-w-5xl mx-auto w-full space-y-6">
-        <Button
-          variant="ghost"
-          onClick={() => navigate("/documents")}
-          className="gap-1"
-        >
+        <Button variant="ghost" onClick={() => navigate("/documents")} className="gap-1">
           <ChevronLeft className="w-4 h-4" /> Back
         </Button>
 
+        {/* Document info bar */}
         <div className="rounded-xl surface-highlight px-6 py-4 flex flex-wrap items-center gap-4">
           <span className="font-semibold text-primary">{doc.title}</span>
-
+          {/* backend returns fileType (camelCase) */}
           <span className="uppercase text-xs font-semibold text-muted-foreground">
             {doc.fileType}
           </span>
-
-          <span className="text-sm text-muted-foreground">
-            {formatDate(doc.createdAt)}
-          </span>
-
+          {/* backend returns createdAt (camelCase) */}
+          <span className="text-sm text-muted-foreground">{formatDate(doc.createdAt)}</span>
           <Badge variant={isSummarized ? "default" : "secondary"}>
             {summarizing ? "Summarizing..." : isSummarized ? "Summarized" : "Pending"}
           </Badge>
 
           <div className="flex gap-2 ml-auto flex-wrap">
+            <Button
+              size="sm"
+              onClick={() => {
+                if (!showSummary) {
+                  setShowSummary(true);
+                  refetchSummary();
+                } else {
+                  setShowSummary(false);
+                }
+              }}
+              disabled={!isSummarized}
+            >
+              <Eye className="w-3 h-3 mr-1" />
+              {showSummary ? "Hide Summary" : "View Summary"}
+            </Button>
             <Button
               size="sm"
               variant="secondary"
@@ -172,7 +178,6 @@ const DocumentDetailPage = () => {
             >
               {summarizing ? "Generating..." : "Generate Summary"}
             </Button>
-
             <Button
               size="sm"
               variant="outline"
@@ -182,7 +187,6 @@ const DocumentDetailPage = () => {
             >
               <Download className="w-3 h-3 mr-1" /> Download
             </Button>
-
             <Button
               size="sm"
               variant="outline"
@@ -195,6 +199,7 @@ const DocumentDetailPage = () => {
           </div>
         </div>
 
+        {/* Summarizing progress bar */}
         {summarizing && (
           <div className="space-y-2">
             <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
@@ -207,14 +212,12 @@ const DocumentDetailPage = () => {
           </div>
         )}
 
-        {isSummarized && !summarizing && (
+        {/* Summary section */}
+        {showSummary && !summarizing && (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-muted-foreground">
-                  Summary type:
-                </span>
-
+                <span className="text-sm font-medium text-muted-foreground">Summary type:</span>
                 <Select
                   value={summaryType}
                   onValueChange={(v) => setSummaryType(v as SummaryType)}
@@ -233,11 +236,9 @@ const DocumentDetailPage = () => {
                 <Button size="sm" variant="outline" onClick={exportSummary}>
                   <Download className="w-3 h-3 mr-1" /> Export
                 </Button>
-
                 <Button size="sm" variant="outline" onClick={copySummary}>
                   <Copy className="w-3 h-3 mr-1" /> Copy
                 </Button>
-
                 <Button
                   size="sm"
                   variant="outline"
@@ -254,9 +255,7 @@ const DocumentDetailPage = () => {
                 <p className="text-muted-foreground">Loading summary...</p>
               ) : summary ? (
                 <div>
-                  <h2 className="text-xl font-bold text-primary mb-4">
-                    {summary.title}
-                  </h2>
+                  <h2 className="text-xl font-bold text-primary mb-4">{summary.title}</h2>
                   <p className="text-foreground whitespace-pre-wrap leading-relaxed">
                     {summary.summary}
                   </p>

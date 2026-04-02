@@ -7,40 +7,31 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import AppHeader from "@/components/AppHeader";
 import { uploadDocument } from "@/lib/api";
-
+import heroImage from "../assets/hero-study.png";
+console.log("heroImage path:", heroImage);
 const ALLOWED = ["pdf", "docx", "txt"];
 
 const Index = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [dragOver, setDragOver] = useState(false);
 
   const getExt = (f: File) => f.name.split(".").pop()?.toLowerCase() || "";
 
-  const handleFile = useCallback(
-    (f: File) => {
-      const ext = getExt(f);
+  const handleFile = useCallback((f: File) => {
+    const ext = getExt(f);
+    if (!ALLOWED.includes(ext)) {
+      toast.error("Only PDF, DOCX, and TXT files are allowed");
+      return;
+    }
+    setFile(f);
+    if (!title) setTitle(f.name.replace(/\.[^.]+$/, ""));
+  }, [title]);
 
-      if (!ALLOWED.includes(ext)) {
-        toast.error("Only PDF, DOCX, and TXT files are allowed");
-        return;
-      }
-
-      setFile(f);
-
-      if (!title) {
-        setTitle(f.name.replace(/\.[^.]+$/, ""));
-      }
-    },
-    [title]
-  );
-
-  const uploadMutation = useMutation({
+  const mutation = useMutation({
     mutationFn: () => {
       if (!file) throw new Error("No file");
       return uploadDocument(title, file, getExt(file));
@@ -50,133 +41,104 @@ const Index = () => {
       toast.success("Document uploaded successfully!");
       navigate("/documents");
     },
-    onError: () => {
-      toast.error("Upload failed");
-    },
+    onError: () => toast.error("Upload failed"),
   });
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       <AppHeader />
+      <main className="flex-1 flex items-center justify-center px-8 py-8">
+        <div className="max-w-6xl w-full grid md:grid-cols-2 gap-12 items-center">
 
-      <main className="container mx-auto px-6 py-16">
-        <div className="grid items-center gap-12 lg:grid-cols-2">
-          {/* Left side */}
-          <div className="max-w-xl">
-            <h1 className="mb-6 text-5xl font-extrabold tracking-tight text-foreground md:text-6xl">
-              Let's study together!
-            </h1>
-
-            <p className="mb-8 text-xl leading-relaxed text-muted-foreground">
-              Upload your files and transform complex content into focused
-              summaries designed for smarter studying
-            </p>
-
-            <Button
-              size="lg"
-              className="px-8"
-              onClick={() => {
-                if (file && title.trim() && !uploadMutation.isPending) {
-                  uploadMutation.mutate();
-                } else {
-                  fileInputRef.current?.click();
-                }
-              }}
-            >
-              {uploadMutation.isPending ? "Uploading..." : file ? "Upload now" : "START"}
-            </Button>
+          {/* Left: hero text + illustration */}
+          <div className="space-y-6">
+            <div className="space-y-4">
+              <h1 className="text-4xl md:text-5xl font-bold text-foreground leading-tight">
+                Let's study together!
+              </h1>
+              <p className="text-lg text-muted-foreground max-w-md">
+                Upload your files and transform complex content into focused summaries
+                designed for smarter studying
+              </p>
+              <Button
+                size="lg"
+                className="px-10 text-base font-semibold"
+                onClick={() => navigate("/documents")}
+              >
+                START
+              </Button>
+            </div>
+            {/* Illustration */}
+            <div className="pt-4">
+              <div className="w-full max-w-md h-48 bg-muted-foreground/20 rounded-lg flex items-center justify-center">
+                <span className="text-sm text-muted-foreground">Illustration unavailable</span>
+              </div>
+            </div>
           </div>
 
-          {/* Right side - real upload box */}
-          <div className="rounded-3xl border bg-card p-8 shadow-sm">
+          {/* Right: Upload form */}
+          <div className="rounded-2xl border border-border bg-card p-8 space-y-6 min-h-[480px] flex flex-col justify-center">
+            {/* Drop zone */}
             <div
-              className={`rounded-2xl border-2 border-dashed p-8 text-center transition-colors cursor-pointer ${
-                dragOver
-                  ? "border-primary bg-primary/5"
-                  : "border-border hover:border-primary/50"
+              className={`border-2 border-dashed rounded-xl p-16 text-center cursor-pointer transition-colors ${
+                dragOver ? "border-primary bg-accent/40" : "border-border"
               }`}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={(e) => {
                 e.preventDefault();
                 setDragOver(false);
-                if (e.dataTransfer.files[0]) {
-                  handleFile(e.dataTransfer.files[0]);
-                }
+                if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
               }}
               onClick={() => fileInputRef.current?.click()}
             >
-              <CloudUpload className="mx-auto mb-4 h-10 w-10 text-primary" />
-              <p className="mb-2 text-lg font-medium text-foreground">
-                Drag or drop files here
-              </p>
-              <p className="mb-4 text-sm text-muted-foreground">- OR -</p>
-
-              <Button type="button" variant="outline">
-                Browse
-              </Button>
-
+              <CloudUpload className="w-10 h-10 mx-auto mb-3 text-primary/60" />
+              <p className="font-medium text-foreground">Drag or drop files here</p>
+              <p className="text-xs text-muted-foreground my-2">- OR -</p>
+              <Button variant="outline" size="sm" type="button">Browse</Button>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept=".pdf,.docx,.txt"
                 className="hidden"
-                onChange={(e) => {
-                  if (e.target.files?.[0]) {
-                    handleFile(e.target.files[0]);
-                  }
-                }}
+                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
               />
             </div>
 
             {file && (
-              <div className="mt-4 flex items-center justify-between rounded-xl border bg-muted/30 px-4 py-3">
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-foreground">{file.name}</p>
-                  <p className="text-sm text-muted-foreground uppercase">
-                    {getExt(file)}
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setFile(null)}
-                  className="text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  <X className="h-5 w-5" />
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent/30 text-sm">
+                <span className="flex-1 truncate font-medium">{file.name}</span>
+                <span className="uppercase text-xs text-muted-foreground font-semibold">{getExt(file)}</span>
+                <button onClick={() => setFile(null)} className="text-muted-foreground hover:text-foreground">
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             )}
 
-            <div className="mt-4 space-y-3">
-              <Input
-                placeholder="Document title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
+            <Input
+              placeholder="Document title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
 
-              <div className="flex gap-3">
-                <Button
-                  className="flex-1"
-                  onClick={() => uploadMutation.mutate()}
-                  disabled={!file || !title.trim() || uploadMutation.isPending}
-                >
-                  {uploadMutation.isPending ? "Uploading..." : "Upload"}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => navigate("/documents")}
-                >
-                  My documents
-                </Button>
-              </div>
+            <div className="flex gap-3">
+              <Button
+                className="flex-1"
+                onClick={() => mutation.mutate()}
+                disabled={!file || !title.trim() || mutation.isPending}
+              >
+                {mutation.isPending ? "Uploading..." : "Upload"}
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => navigate("/documents")}
+              >
+                My documents
+              </Button>
             </div>
           </div>
+
         </div>
       </main>
     </div>
