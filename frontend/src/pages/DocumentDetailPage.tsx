@@ -158,12 +158,17 @@ const DocumentDetailPage = () => {
             <Button
               size="sm"
               onClick={() => {
-                setShowSummary(true);
-                refetchSummary();
+                if (!showSummary) {
+                  setShowSummary(true);
+                  refetchSummary();
+                } else {
+                  setShowSummary(false);
+                }
               }}
               disabled={!isSummarized}
             >
-              <Eye className="w-3 h-3 mr-1" /> View Summary
+              <Eye className="w-3 h-3 mr-1" />
+              {showSummary ? "Hide Summary" : "View Summary"}
             </Button>
             <Button
               size="sm"
