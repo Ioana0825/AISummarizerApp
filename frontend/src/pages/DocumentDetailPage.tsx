@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, Eye, Trash2, Copy, Download } from "lucide-react";
+import { ChevronLeft, Eye, EyeOff, Trash2, Copy, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -122,10 +122,10 @@ const DocumentDetailPage = () => {
     );
   }
 
-  // Your backend returns createdAt (camelCase)
   const formatDate = (d: string) => {
     try {
-      return format(new Date(d), "dd.MM.yyyy HH:mm");
+      const date = new Date(d.endsWith("Z") ? d : d + "Z");
+      return format(date, "dd.MM.yyyy HH:mm");
     } catch {
       return d;
     }
@@ -142,21 +142,42 @@ const DocumentDetailPage = () => {
         </Button>
 
         {/* Document info bar */}
-        <div className="rounded-xl surface-highlight px-6 py-4 flex flex-wrap items-center gap-4">
+        <div className="rounded-xl surface-highlight px-6 py-3 flex flex-wrap items-center gap-3">
           <span className="font-semibold text-primary">{doc.title}</span>
-          {/* backend returns fileType (camelCase) */}
           <span className="uppercase text-xs font-semibold text-muted-foreground">
             {doc.fileType}
           </span>
-          {/* backend returns createdAt (camelCase) */}
           <span className="text-sm text-muted-foreground">{formatDate(doc.createdAt)}</span>
           <Badge variant={isSummarized ? "default" : "secondary"}>
             {summarizing ? "Summarizing..." : isSummarized ? "Summarized" : "Pending"}
           </Badge>
 
-          <div className="flex gap-2 ml-auto flex-wrap">
+          <div className="flex gap-2 ml-auto items-center">
+            <Select
+              value={summaryType}
+              onValueChange={(v) => setSummaryType(v as SummaryType)}
+            >
+              <SelectTrigger className="w-30 h-8 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="concise">Concise</SelectItem>
+                <SelectItem value="detailed">Detailed</SelectItem>
+              </SelectContent>
+            </Select>
             <Button
               size="sm"
+              className="h-8 text-sm px-3"
+              variant="secondary"
+              onClick={() => summarizeMut.mutate()}
+              disabled={summarizing || summarizeMut.isPending}
+            >
+              {summarizing ? "Generating..." : "Summarize"}
+            </Button>
+            <Button
+              size="icon"
+              className="h-8 w-8"
+              variant="outline"
               onClick={() => {
                 if (!showSummary) {
                   setShowSummary(true);
@@ -166,35 +187,30 @@ const DocumentDetailPage = () => {
                 }
               }}
               disabled={!isSummarized}
+              title={showSummary ? "Hide summary" : "View summary"}
             >
-              <Eye className="w-3 h-3 mr-1" />
-              {showSummary ? "Hide Summary" : "View Summary"}
+              {showSummary ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </Button>
             <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => summarizeMut.mutate()}
-              disabled={summarizing || summarizeMut.isPending}
-            >
-              {summarizing ? "Generating..." : "Generate Summary"}
-            </Button>
-            <Button
-              size="sm"
+              size="icon"
+              className="h-8 w-8"
               variant="outline"
               onClick={() =>
                 downloadDocumentFile(doc.id).catch(() => toast.error("Download failed"))
               }
+              title="Download file"
             >
-              <Download className="w-3 h-3 mr-1" /> Download
+              <Download className="w-4 h-4" />
             </Button>
             <Button
-              size="sm"
+              size="icon"
+              className="h-8 w-8 text-destructive border-destructive/30 hover:bg-destructive/10"
               variant="outline"
-              className="text-destructive border-destructive/30 hover:bg-destructive/10"
               onClick={() => deleteMut.mutate()}
               disabled={deleteMut.isPending}
+              title="Delete document"
             >
-              <Trash2 className="w-3 h-3 mr-1" /> Delete
+              <Trash2 className="w-4 h-4" />
             </Button>
           </div>
         </div>
@@ -215,37 +231,22 @@ const DocumentDetailPage = () => {
         {/* Summary section */}
         {showSummary && !summarizing && (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-muted-foreground">Summary type:</span>
-                <Select
-                  value={summaryType}
-                  onValueChange={(v) => setSummaryType(v as SummaryType)}
-                >
-                  <SelectTrigger className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="concise">Concise</SelectItem>
-                    <SelectItem value="detailed">Detailed</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
+            <div className="flex flex-wrap items-center gap-2">
               <div className="flex gap-2 ml-auto">
-                <Button size="sm" variant="outline" onClick={exportSummary}>
-                  <Download className="w-3 h-3 mr-1" /> Export
+                <Button size="sm" className="h-8 text-sm px-3" variant="outline" onClick={exportSummary}>
+                  <Download className="w-3.5 h-3.5 mr-1" /> Export
                 </Button>
-                <Button size="sm" variant="outline" onClick={copySummary}>
-                  <Copy className="w-3 h-3 mr-1" /> Copy
+                <Button size="sm" className="h-8 text-sm px-3" variant="outline" onClick={copySummary}>
+                  <Copy className="w-3.5 h-3.5 mr-1" /> Copy
                 </Button>
                 <Button
                   size="sm"
+                  className="h-8 text-sm px-3"
                   variant="outline"
                   onClick={() => regenMut.mutate()}
                   disabled={regenMut.isPending || summarizing}
                 >
-                  Regenerate summary
+                  Regenerate
                 </Button>
               </div>
             </div>

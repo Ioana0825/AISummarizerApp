@@ -79,7 +79,8 @@ const DocumentsPage = () => {
   // Your backend returns createdAt (camelCase)
   const formatDate = (dateStr: string) => {
     try {
-      return format(new Date(dateStr), "dd.MM.yyyy HH:mm");
+      const date = new Date(dateStr.endsWith("Z") ? dateStr : dateStr + "Z");
+      return format(date, "dd.MM.yyyy HH:mm");
     } catch {
       return dateStr;
     }
