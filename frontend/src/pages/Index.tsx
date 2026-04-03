@@ -70,8 +70,13 @@ const Index = () => {
             </div>
             {/* Illustration */}
             <div className="pt-4">
-              <div className="w-full max-w-md h-48 bg-muted-foreground/20 rounded-lg flex items-center justify-center">
-                <span className="text-sm text-muted-foreground">Illustration unavailable</span>
+              <div className="w-full max-w-md h-48 rounded-lg flex items-center justify-center">
+                <img
+                src={heroImage}
+                alt=""
+                className="w-full max-w-lg"
+                style={{ mixBlendMode: "multiply" }}
+              />
               </div>
             </div>
           </div>
