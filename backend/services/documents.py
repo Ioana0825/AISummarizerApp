@@ -1,10 +1,10 @@
 import os, json, uuid
-
 # for AI
 import requests
+from services.rag import store_document_chunks, retrieve_best_chunks, retrieve_all_chunks_ordered
 from dotenv import load_dotenv
 load_dotenv()
-HF_API_TOKEN = os.getenv("HF_API_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 from fastapi.responses import FileResponse
 from fastapi import HTTPException
@@ -123,65 +123,74 @@ def extract_text_from_file(file_path: str, file_type: str) -> str:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_type}")
 
 
-def generate_summary_with_ai(text: str, summary_type: str) -> str:
-    max_chars = 6000 if summary_type == "concise" else 12000
-    truncated_text = text[:max_chars]
-
-    if not truncated_text.strip():
+def generate_summary_with_ai(text: str, summary_type: str, doc_id: str) -> str:
+    if not text.strip():
         raise HTTPException(status_code=400, detail="Document appears to be empty or unreadable")
 
+    # Step 1: Chunk and store in ChromaDB
+    store_document_chunks(doc_id, text)
+
+    # Step 2: Retrieve chunks
+    if summary_type == "concise":
+        chunks = retrieve_best_chunks(doc_id, "main ideas key concepts important points summary", n_results=8)
+    else:
+        chunks = retrieve_all_chunks_ordered(doc_id)
+
+    if not chunks:
+        return fallback_summary(text, summary_type)
+
+    # Step 3: Build context from retrieved chunks
+    combined_text = "\n\n---\n\n".join(chunks)
+    max_chars = 8000 if summary_type == "concise" else 20000
+    combined_text = combined_text[:max_chars]
+
+    # Step 4: Generate summary with Ollama (local)
     if summary_type == "concise":
         prompt = (
-            "Create a concise, study-friendly summary of the following document.\n\n"
+            "Create a concise, study-friendly summary based on the following key sections from a document.\n\n"
             "Requirements:\n"
-            "- Length: 5–8 bullet points (NOT paragraphs)\n"
+            "- Length: 5-8 bullet points\n"
             "- Each bullet: 1 short sentence\n"
             "- Focus only on key concepts, definitions, and main ideas\n"
-            "- Remove examples, explanations, and minor details\n"
-            "- Use clear, simple language for quick revision\n\n"
-            "Format:\n"
-            "- Bullet points only\n\n"
-            f"Document:\n{truncated_text}\n\nConcise Study Summary:"
+            "- Use clear, simple language for quick revision\n"
+            "- IMPORTANT: Write the summary in the SAME LANGUAGE as the document\n\n"
+            f"Document sections:\n{combined_text}\n\nConcise Study Summary:"
         )
     else:
         prompt = (
-            "Create a detailed, structured study summary of the following document.\n\n"
+            "Create a detailed, structured study summary based on the following sections from a document.\n\n"
             "Requirements:\n"
-            "- Length: at least 3–6 sections\n"
+            "- Length: at least 3-6 sections\n"
             "- Include headings and subheadings\n"
-            "- Explain key concepts clearly (like study notes)\n"
+            "- Explain key concepts clearly like study notes\n"
             "- Include definitions, explanations, and important details\n"
-            "- Keep all important arguments and conclusions\n"
             "- Use bullet points where helpful\n"
-            "- Add short examples ONLY if they clarify concepts\n\n"
-            "Format:\n"
-            "1. Title (based on the topic)\n"
-            "2. Sections with headings\n"
-            "3. Bullet points + short paragraphs\n\n"
-            "Goal: The summary should be usable for learning and exam preparation.\n\n"
-            f"Document:\n{truncated_text}\n\nDetailed Study Summary:"
+            "- The summary should be usable for learning and exam preparation\n"
+            "- IMPORTANT: Write the summary in the SAME LANGUAGE as the document\n\n"
+            f"Document sections:\n{combined_text}\n\nDetailed Study Summary:"
         )
-    API_URL = "https://router.huggingface.co/hf-inference/models/mistralai/Mistral-7B-Instruct-v0.3"
-    headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
-    payload = {
-        "inputs": f"<s>[INST] {prompt} [/INST]",
-        "parameters": {
-            "max_new_tokens": 500 if summary_type == "concise" else 1500,
-            "temperature": 0.3,
-            "return_full_text": False,
-        }
-    }
 
-    response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
+    try:
+        response = requests.post("http://localhost:11434/api/generate", json={
+            "model": "llama3.1:8b",
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.3,
+                "num_predict": 500 if summary_type == "concise" else 1500,
+            }
+        }, timeout=120)
 
-    if response.status_code != 200:
+        if response.status_code == 200:
+            result = response.json()
+            return result["response"].strip()
+        else:
+            print(f"Ollama error: {response.status_code} - {response.text}")
+            return fallback_summary(text, summary_type)
+
+    except Exception as e:
+        print(f"Ollama exception: {e}")
         return fallback_summary(text, summary_type)
-
-    result = response.json()
-    if isinstance(result, list) and len(result) > 0:
-        return result[0].get("generated_text", "").strip()
-
-    return fallback_summary(text, summary_type)
 
 
 def fallback_summary(text: str, summary_type: str) -> str:
@@ -199,7 +208,7 @@ async def summarize_document_service(db: Session, doc_id: str, summary_type: str
 
     # actual summary instead of fake text
     text = extract_text_from_file(doc.filePath, doc.fileType)
-    summary = generate_summary_with_ai(text, summary_type)
+    summary = generate_summary_with_ai(text, summary_type, doc_id)
 
     from db.mongo import summaries_collection
 
