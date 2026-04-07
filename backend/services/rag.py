@@ -2,9 +2,6 @@ import chromadb
 import requests
 import os
 import hashlib
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # ChromaDB stores vectors locally in this folder
 CHROMA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "chroma_db"))
@@ -25,26 +22,25 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[st
 
 
 def get_embeddings(texts: list[str]) -> list[list[float]]:
-    """Get embeddings from Gemini REST API."""
-    API_KEY = os.getenv("GEMINI_API_KEY")
+    """Get embeddings from Ollama (runs locally, no API key needed)."""
     embeddings = []
 
-    for i in range(0, len(texts), 100):
-        batch = texts[i:i + 100]
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-exp-03-07:embedContent?key={API_KEY}"
-
-        for text in batch:
-            response = requests.post(url, json={
-                "model": "models/gemini-embedding-exp-03-07",
-                "content": {"parts": [{"text": text}]}
+    for text in texts:
+        try:
+            response = requests.post("http://localhost:11434/api/embeddings", json={
+                "model": "llama3.2:3b",
+                "prompt": text
             }, timeout=30)
 
             if response.status_code == 200:
                 data = response.json()
-                embeddings.append(data["embedding"]["values"])
+                embeddings.append(data["embedding"])
             else:
-                print(f"Embedding error: {response.status_code} - {response.text}")
+                print(f"Ollama embedding error: {response.status_code} - {response.text}")
                 return []
+        except Exception as e:
+            print(f"Ollama embedding exception: {e}")
+            return []
 
     return embeddings
 
@@ -94,9 +90,13 @@ def retrieve_best_chunks(doc_id: str, query: str, n_results: int = 10) -> list[s
     if not query_embedding:
         return []
 
+    count = collection.count()
+    if count == 0:
+        return []
+
     results = collection.query(
         query_embeddings=[query_embedding[0]],
-        n_results=min(n_results, collection.count()),
+        n_results=min(n_results, count),
     )
 
     return results["documents"][0] if results["documents"] else []

@@ -5,6 +5,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from routes.documents import documents_router
 
 app = FastAPI()
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(413)
+async def request_entity_too_large(request, exc):
+    return JSONResponse(status_code=413, content={"detail": "File too large. Maximum size is 25MB."})
+
+# Allow uploads up to 25MB
+from starlette.middleware import Middleware
+import starlette
+
+@app.middleware("http")
+async def increase_upload_size(request, call_next):
+    return await call_next(request)
 
 app.add_middleware(
     CORSMiddleware,

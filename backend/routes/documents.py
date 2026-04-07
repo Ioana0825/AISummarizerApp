@@ -37,7 +37,7 @@ def get_documents_by_id(id: str, db: Session = Depends(get_db)):
 @documents_router.post("", response_model=DocumentCreateResponse)
 async def upload_document(
     title: str = Form(...),
-    file: UploadFile = File(...),
+    file: UploadFile = File(..., max_size=25 * 1024 * 1024),
     fileType: str = Form(...),
     db: Session = Depends(get_db)
 ):

@@ -4,7 +4,6 @@ import requests
 from services.rag import store_document_chunks, retrieve_best_chunks, retrieve_all_chunks_ordered
 from dotenv import load_dotenv
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 from fastapi.responses import FileResponse
 from fastapi import HTTPException
@@ -110,11 +109,16 @@ def extract_text_from_file(file_path: str, file_type: str) -> str:
             return f.read()
     elif file_type == "pdf":
         import fitz
-        text = ""
+        parts = []
         with fitz.open(file_path) as doc:
-            for page in doc:
-                text += page.get_text()
-        return text
+            total = len(doc)
+            print(f"Extracting text from {total} pages...")
+            for i, page in enumerate(doc):
+                parts.append(page.get_text())
+                if (i + 1) % 50 == 0:
+                    print(f"  ...page {i + 1}/{total}")
+            print(f"Extraction complete: {len(''.join(parts))} characters")
+            return "\n".join(parts)
     elif file_type == "docx":
         from docx import Document as DocxDocument
         doc = DocxDocument(file_path)
@@ -127,65 +131,69 @@ def generate_summary_with_ai(text: str, summary_type: str, doc_id: str) -> str:
     if not text.strip():
         raise HTTPException(status_code=400, detail="Document appears to be empty or unreadable")
 
-    # Step 1: Chunk and store in ChromaDB
-    store_document_chunks(doc_id, text)
+    # Take text from beginning, middle, and end to cover the whole document
+    max_chars = 4000 if summary_type == "concise" else 16000
 
-    # Step 2: Retrieve chunks
-    if summary_type == "concise":
-        chunks = retrieve_best_chunks(doc_id, "main ideas key concepts important points summary", n_results=8)
+    if len(text) <= max_chars:
+        selected_text = text
     else:
-        chunks = retrieve_all_chunks_ordered(doc_id)
+        # Sample sections evenly across the document
+        num_sections = 5 if summary_type == "concise" else 8
+        section_size = max_chars // num_sections
+        doc_len = len(text)
+        sections = []
 
-    if not chunks:
-        return fallback_summary(text, summary_type)
+        for i in range(num_sections):
+            start = int(i * (doc_len - section_size) / (num_sections - 1))
+            sections.append(text[start:start + section_size])
 
-    # Step 3: Build context from retrieved chunks
-    combined_text = "\n\n---\n\n".join(chunks)
-    max_chars = 8000 if summary_type == "concise" else 20000
-    combined_text = combined_text[:max_chars]
+        selected_text = "\n\n[...]\n\n".join(sections)
 
-    # Step 4: Generate summary with Ollama (local)
+    return _single_call_summary(selected_text, summary_type)
+
+
+def _single_call_summary(text: str, summary_type: str) -> str:
     if summary_type == "concise":
         prompt = (
-            "Create a concise, study-friendly summary based on the following key sections from a document.\n\n"
+            "Create a concise study summary of the following text.\n\n"
             "Requirements:\n"
-            "- Length: 5-8 bullet points\n"
-            "- Each bullet: 1 short sentence\n"
-            "- Focus only on key concepts, definitions, and main ideas\n"
-            "- Use clear, simple language for quick revision\n"
-            "- IMPORTANT: Write the summary in the SAME LANGUAGE as the document\n\n"
-            f"Document sections:\n{combined_text}\n\nConcise Study Summary:"
+            "- 5-8 bullet points, each 1 short sentence\n"
+            "- Only key concepts, definitions, and main ideas\n"
+            "- Write in the SAME LANGUAGE as the text\n"
+            "- Do NOT use markdown formatting like ** or ##\n\n"
+            f"Text:\n{text}\n\nConcise Study Summary:"
         )
     else:
         prompt = (
-            "Create a detailed, structured study summary based on the following sections from a document.\n\n"
+            "Create a detailed study guide from the following text.\n\n"
             "Requirements:\n"
-            "- Length: at least 3-6 sections\n"
-            "- Include headings and subheadings\n"
-            "- Explain key concepts clearly like study notes\n"
-            "- Include definitions, explanations, and important details\n"
+            "- 3-6 sections with clear headings\n"
+            "- Explain key concepts like study notes\n"
+            "- Include definitions and important details\n"
             "- Use bullet points where helpful\n"
-            "- The summary should be usable for learning and exam preparation\n"
-            "- IMPORTANT: Write the summary in the SAME LANGUAGE as the document\n\n"
-            f"Document sections:\n{combined_text}\n\nDetailed Study Summary:"
+            "- Write in the SAME LANGUAGE as the text\n"
+            "- Do NOT use markdown formatting like ** or ##\n\n"
+            f"Text:\n{text}\n\nDetailed Study Guide:"
         )
 
     try:
         response = requests.post("http://localhost:11434/api/generate", json={
-            "model": "llama3.1:8b",
+            "model": "llama3.2:3b",
             "prompt": prompt,
             "stream": False,
             "options": {
                 "temperature": 0.3,
-                "num_predict": 500 if summary_type == "concise" else 1500,
+                "num_predict": 400 if summary_type == "concise" else 3000,
             }
-        }, timeout=120)
+        }, timeout=600)
 
         if response.status_code == 200:
-            result = response.json()
-            return result["response"].strip()
+            summary = response.json()["response"].strip()
+            summary = summary.replace("**", "").replace("##", "").replace("###", "")
+            summary += "\n\n---\nNote: This summary was generated by AI. Please verify important facts, names, and dates against the original document."
+            return summary
         else:
-            print(f"Ollama error: {response.status_code} - {response.text}")
+            print(f"Ollama error: {response.status_code}")
             return fallback_summary(text, summary_type)
 
     except Exception as e:
