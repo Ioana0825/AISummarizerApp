@@ -1,10 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import Index from "./pages/Index";
 import DocumentsPage from "./pages/DocumentsPage";
-import UploadPage from "./pages/UploadPage";
 import DocumentDetailPage from "./pages/DocumentDetailPage";
 import NotFound from "./pages/NotFound";
 
@@ -18,7 +17,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/documents" element={<DocumentsPage />} />
-          <Route path="/upload" element={<UploadPage />} />
+          <Route path="/upload" element={<Navigate to="/" replace />} />
           <Route path="/documents/:id" element={<DocumentDetailPage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

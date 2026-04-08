@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import AppHeader from "@/components/AppHeader";
 import { uploadDocument } from "@/lib/api";
 import heroImage from "../assets/hero-study.png";
-console.log("heroImage path:", heroImage);
+
 const ALLOWED = ["pdf", "docx", "txt"];
 
 const Index = () => {
