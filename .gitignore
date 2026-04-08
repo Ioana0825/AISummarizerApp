@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment / secrets
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Runtime data (backend)
+backend/uploads/
+backend/documents.db
+backend/chroma_db/
+
+# OS
+.DS_Store
+Thumbs.db

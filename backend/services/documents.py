@@ -1,32 +1,45 @@
-import os, json, uuid
-# for AI
+import os
+import re
+import json
+import uuid
 import requests
-from services.rag import store_document_chunks, retrieve_best_chunks, retrieve_all_chunks_ordered
-from dotenv import load_dotenv
-load_dotenv()
-
-from fastapi.responses import FileResponse
-from fastapi import HTTPException
 from datetime import datetime
 
-from schemas.documents_schemas import DocumentResponse, DocumentCreateResponse, DocumentCreate
-
+from fastapi import HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+from dotenv import load_dotenv
+
 from db.models import Document
+from db.mongo import summaries_collection
+from schemas.documents_schemas import (
+    DocumentResponse, DocumentCreateResponse, DocumentCreate
+)
+from services.rag import (
+    store_document_chunks, retrieve_best_chunks,
+    retrieve_all_chunks_ordered
+)
+
+load_dotenv()
+
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "txt"}
 
-UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "uploads"))
+UPLOAD_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "uploads")
+)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 type_mapping = {
     "pdf": "application/pdf",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "txt": "text/plain"
+    "txt": "text/plain",
 }
+
 
 def get_documents(db: Session):
     return db.query(Document).all()
+
 
 def get_document_by_id(db: Session, doc_id: str):
     doc = db.query(Document).filter(Document.id == doc_id).first()
@@ -34,53 +47,32 @@ def get_document_by_id(db: Session, doc_id: str):
         raise HTTPException(status_code=404, detail="Document not found")
     return doc
 
-
 async def upload_document_service(file, title, fileType, db: Session):
-    import re
-    import os
-    import uuid
-    from fastapi import HTTPException
-    from db.models import Document
-
-    # Validate file extension
     file_extension = file.filename.split(".")[-1].lower()
     if file_extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=422, detail="File extension not allowed")
 
-    # Generate UUID for document
     doc_id = str(uuid.uuid4())
-
-    # Sanitize filename
-    safe_filename = re.sub(r'[^a-zA-Z0-9_.-]', '_', file.filename)
+    safe_filename = re.sub(r"[^a-zA-Z0-9_.-]", "_", file.filename)
     file_name = f"{doc_id}_{safe_filename}"
     full_path = os.path.join(UPLOAD_DIR, file_name)
 
-    # Save file to disk
     content = await file.read()
     with open(full_path, "wb") as f_disk:
         f_disk.write(content)
 
-    # Create DB record
     new_doc = Document(
         id=doc_id,
         title=title,
         fileType=file_extension,
         filePath=full_path,
         status="pending",
-        #summary=None,
-        #summaryType=None,
-        #summaryGeneratedAt=None
     )
     db.add(new_doc)
     db.commit()
     db.refresh(new_doc)
 
-    from schemas.documents_schemas import DocumentCreateResponse
-    return DocumentCreateResponse(
-        id=doc_id,
-        message="Document uploaded successfully"
-    )
-
+    return DocumentCreateResponse(id=doc_id, message="Document uploaded successfully")
 
 def delete_document_service(db: Session, doc_id: str):
     doc = db.query(Document).filter(Document.id == doc_id).first()
@@ -98,9 +90,7 @@ def delete_document_service(db: Session, doc_id: str):
     return {"message": "Document deleted successfully"}
 
 
-
-# generatin gsummary with AI==========================================================================
-
+# --- Text extraction ---
 def extract_text_from_file(file_path: str, file_type: str) -> str:
     file_type = file_type.lower()
 
@@ -111,47 +101,37 @@ def extract_text_from_file(file_path: str, file_type: str) -> str:
         import fitz
         parts = []
         with fitz.open(file_path) as doc:
-            total = len(doc)
-            print(f"Extracting text from {total} pages...")
-            for i, page in enumerate(doc):
+            for page in doc:
                 parts.append(page.get_text())
-                if (i + 1) % 50 == 0:
-                    print(f"  ...page {i + 1}/{total}")
-            print(f"Extraction complete: {len(''.join(parts))} characters")
-            return "\n".join(parts)
+        return "\n".join(parts)
     elif file_type == "docx":
         from docx import Document as DocxDocument
         doc = DocxDocument(file_path)
-        return "\n".join([para.text for para in doc.paragraphs])
+        return "\n".join(para.text for para in doc.paragraphs)
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_type}")
 
 
+# --- AI summarization ---
 def generate_summary_with_ai(text: str, summary_type: str, doc_id: str) -> str:
     if not text.strip():
-        raise HTTPException(status_code=400, detail="Document appears to be empty or unreadable")
+        raise HTTPException(status_code=400, detail="Document appears to be empty")
 
-    # Take text from beginning, middle, and end to cover the whole document
     max_chars = 4000 if summary_type == "concise" else 16000
 
     if len(text) <= max_chars:
         selected_text = text
     else:
-        # Sample sections evenly across the document
         num_sections = 5 if summary_type == "concise" else 8
         section_size = max_chars // num_sections
         doc_len = len(text)
         sections = []
-
         for i in range(num_sections):
             start = int(i * (doc_len - section_size) / (num_sections - 1))
-            sections.append(text[start:start + section_size])
-
+            sections.append(text[start : start + section_size])
         selected_text = "\n\n[...]\n\n".join(sections)
 
     return _single_call_summary(selected_text, summary_type)
-
-
 def _single_call_summary(text: str, summary_type: str) -> str:
     if summary_type == "concise":
         prompt = (
@@ -175,50 +155,52 @@ def _single_call_summary(text: str, summary_type: str) -> str:
             "- Do NOT use markdown formatting like ** or ##\n\n"
             f"Text:\n{text}\n\nDetailed Study Guide:"
         )
-
     try:
-        response = requests.post("http://localhost:11434/api/generate", json={
-            "model": "llama3.2:3b",
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.3,
-                "num_predict": 400 if summary_type == "concise" else 3000,
-            }
-        }, timeout=600)
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "llama3.2:3b",
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.3,
+                    "num_predict": 400 if summary_type == "concise" else 3000,
+                },
+            },
+            timeout=600,
+        )
 
         if response.status_code == 200:
             summary = response.json()["response"].strip()
             summary = summary.replace("**", "").replace("##", "").replace("###", "")
-            summary += "\n\n---\nNote: This summary was generated by AI. Please verify important facts, names, and dates against the original document."
+            summary += (
+                "\n\n---\nNote: This summary was generated by AI. "
+                "Please verify important facts against the original document."
+            )
             return summary
         else:
-            print(f"Ollama error: {response.status_code}")
             return fallback_summary(text, summary_type)
-
-    except Exception as e:
-        print(f"Ollama exception: {e}")
+    except Exception:
         return fallback_summary(text, summary_type)
 
-
 def fallback_summary(text: str, summary_type: str) -> str:
-    sentences = [s.strip() for s in text.replace("\n", " ").split(".") if len(s.strip()) > 20]
+    sentences = [
+        s.strip()
+        for s in text.replace("\n", " ").split(".")
+        if len(s.strip()) > 20
+    ]
     count = 3 if summary_type == "concise" else 8
     return ". ".join(sentences[:count]) + "." if sentences else "Could not generate summary."
 
-#=====================================================================================================
-
+# --- Summary endpoints ---
 
 async def summarize_document_service(db: Session, doc_id: str, summary_type: str):
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # actual summary instead of fake text
     text = extract_text_from_file(doc.filePath, doc.fileType)
     summary = generate_summary_with_ai(text, summary_type, doc_id)
-
-    from db.mongo import summaries_collection
 
     await summaries_collection.update_one(
         {"documentId": doc.id},
@@ -227,21 +209,17 @@ async def summarize_document_service(db: Session, doc_id: str, summary_type: str
                 "documentId": doc.id,
                 "summary": summary,
                 "summaryType": summary_type,
-                "generatedAt": datetime.utcnow()
+                "generatedAt": datetime.utcnow(),
             }
         },
-        upsert=True
+        upsert=True,
     )
-
-    # ✅ update SQL status so the UI can show summarized
     doc.status = "summarized"
     db.commit()
 
     return {"message": "Summarization started", "documentId": doc.id}
 
-
 async def get_summary_service(db, doc_id: str):
-    from db.mongo import summaries_collection
     result = await summaries_collection.find_one({"documentId": doc_id})
     if not result:
         raise HTTPException(status_code=404, detail="Summary not found")
@@ -250,10 +228,8 @@ async def get_summary_service(db, doc_id: str):
         "documentId": result["documentId"],
         "title": get_document_by_id(db, doc_id).title,
         "summary": result["summary"],
-        "generatedAt": result["generatedAt"]
+        "generatedAt": result["generatedAt"],
     }
-
-
 
 async def regenerate_summary_service(db, doc_id: str, summary_type: str):
     return await summarize_document_service(db, doc_id, summary_type)
