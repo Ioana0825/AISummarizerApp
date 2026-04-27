@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 from db.models import Document
 from db.mongo import summaries_collection
 from schemas.documents_schemas import DocumentCreateResponse
-from services.rag import store_document_chunks, retrieve_best_chunks, retrieve_all_chunks_ordered
 
 load_dotenv()
 
@@ -40,13 +39,11 @@ def get_document_by_id(db: Session, doc_id: str):
 
 async def upload_document_service(file, title, fileType, db: Session):
     file_extension = file.filename.split(".")[-1].lower()
-    print(f"[Upload] filename={file.filename!r}, ext={file_extension!r}, fileType={fileType!r}, content_type={file.content_type!r}")
 
     if file_extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=422, detail="File extension not allowed")
 
     content = await file.read()
-    print(f"[Upload] File size: {len(content)} bytes, limit: {MAX_FILE_SIZE} bytes")
 
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(
@@ -68,7 +65,7 @@ async def upload_document_service(file, title, fileType, db: Session):
         fileType=file_extension,
         filePath=full_path,
         status="pending",
-        fileSize=len(content),  # save file size in bytes
+        fileSize=len(content),
     )
     db.add(new_doc)
     db.commit()
@@ -116,15 +113,6 @@ def extract_text_from_file(file_path: str, file_type: str) -> str:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_type}")
 
 
-# --- Time estimation ---
-
-def estimate_summary_time(text_length: int, summary_type: str) -> int:
-    if summary_type == "concise":
-        return max(15, min(60, text_length // 2000))
-    else:
-        return max(20, min(120, text_length // 1000))
-
-
 # --- Chunking ---
 
 def chunk_text(text: str, chunk_size: int = 4000, overlap: int = 400) -> list[str]:
@@ -139,27 +127,30 @@ def chunk_text(text: str, chunk_size: int = 4000, overlap: int = 400) -> list[st
     return chunks
 
 
-# --- Groq API call (non-streaming) ---
+# --- Groq API call (non-streaming, used for map step) ---
 
 def _call_groq(prompt: str, max_tokens: int = 400) -> str:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         return ""
 
+    payload = {
+        "model": "llama-3.1-8b-instant",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
     try:
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "llama-3.1-8b-instant",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "max_tokens": max_tokens,
-                "stream": False,
-            },
+            headers=headers,
+            json=payload,
             timeout=60,
         )
 
@@ -170,17 +161,8 @@ def _call_groq(prompt: str, max_tokens: int = 400) -> str:
             time.sleep(15)
             response = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "llama-3.1-8b-instant",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3,
-                    "max_tokens": max_tokens,
-                    "stream": False,
-                },
+                headers=headers,
+                json=payload,
                 timeout=60,
             )
             if response.status_code == 200:
@@ -255,7 +237,8 @@ def stream_summary_tokens(text: str, summary_type: str) -> Generator[str, None, 
     trimmed = [s[:200] for s in chunk_summaries]
     combined = "\n\n---\n\n".join(trimmed)
 
-    tpm_window = 62
+    # Wait only as long as needed for the TPM window to reset
+    tpm_window = 75 if summary_type == "detailed" else 62
     wait_needed = max(0, tpm_window - map_elapsed)
     if wait_needed > 0:
         print(f"[MapReduce] Map took {map_elapsed:.0f}s, waiting {wait_needed:.0f}s for TPM reset...")
@@ -320,6 +303,22 @@ def stream_summary_tokens(text: str, summary_type: str) -> Generator[str, None, 
         )
 
         print(f"[MapReduce reduce] Status: {response.status_code}")
+        if response.status_code == 429:
+            print("[MapReduce] Reduce step rate limited, waiting 20s...")
+            time.sleep(20)
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "llama-3.1-8b-instant",
+                    "messages": [{"role": "user", "content": reduce_prompt}],
+                    "temperature": 0.4,
+                    "max_tokens": 1800,
+                    "stream": True,
+                },
+                stream=True,
+                timeout=120,
+            )
         if response.status_code != 200:
             print(f"[MapReduce reduce ERROR] {response.text[:300]}")
             yield fallback_summary(text, summary_type)
@@ -347,13 +346,7 @@ def stream_summary_tokens(text: str, summary_type: str) -> Generator[str, None, 
         yield fallback_summary(text, summary_type)
 
 
-# --- Non-streaming version ---
-
-def generate_summary_with_ai(text: str, summary_type: str, doc_id: str) -> str:
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Document appears to be empty")
-    return "".join(stream_summary_tokens(text, summary_type))
-
+# --- Clean AI output ---
 
 def _clean_ai_output(text: str) -> str:
     text = text.replace("**", "").replace("##", "").replace("###", "")
@@ -402,9 +395,7 @@ async def summarize_document_service(db: Session, doc_id: str, summary_type: str
         raise HTTPException(status_code=404, detail="Document not found")
 
     text = extract_text_from_file(doc.filePath, doc.fileType)
-    estimated_seconds = estimate_summary_time(len(text), summary_type)
-
-    raw = generate_summary_with_ai(text, summary_type, doc_id)
+    raw = "".join(stream_summary_tokens(text, summary_type))
     raw = re.sub(r"^⚠️[^\n]+\n\n?", "", raw)
     summary = _clean_ai_output(raw)
 
@@ -428,7 +419,6 @@ async def summarize_document_service(db: Session, doc_id: str, summary_type: str
     return {
         "message": "Summarization complete",
         "documentId": doc_id,
-        "estimatedSeconds": estimated_seconds,
     }
 
 

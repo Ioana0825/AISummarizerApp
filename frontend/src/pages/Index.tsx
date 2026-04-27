@@ -41,7 +41,14 @@ const Index = () => {
       toast.success("Document uploaded successfully!");
       navigate("/documents");
     },
-    onError: () => toast.error("Upload failed"),
+    onError: (error: Error) => {
+      try {
+        const parsed = JSON.parse(error.message);
+        toast.error(parsed.detail || "Upload failed");
+      } catch {
+        toast.error(error.message || "Upload failed");
+      }
+    },
   });
 
   return (
@@ -61,7 +68,6 @@ const Index = () => {
                 designed for smarter studying
               </p>
             </div>
-            {/* Illustration */}
             <div className="pt-4">
               <div className="w-full max-w-md h-48 rounded-lg flex items-center justify-center">
                 <img
@@ -76,7 +82,6 @@ const Index = () => {
 
           {/* Right: Upload form */}
           <div className="rounded-2xl border border-border bg-card p-8 space-y-6 min-h-[480px] flex flex-col justify-center">
-            {/* Drop zone */}
             <div
               className={`border-2 border-dashed rounded-xl p-16 text-center cursor-pointer transition-colors ${
                 dragOver ? "border-primary bg-accent/40" : "border-border"
@@ -94,6 +99,7 @@ const Index = () => {
               <p className="font-medium text-foreground">Drag or drop files here</p>
               <p className="text-xs text-muted-foreground my-2">- OR -</p>
               <Button variant="outline" size="sm" type="button">Browse</Button>
+              <p className="text-xs text-muted-foreground mt-3">PDF, DOCX, TXT · max 20MB</p>
               <input
                 ref={fileInputRef}
                 type="file"

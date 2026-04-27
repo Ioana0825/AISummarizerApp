@@ -10,21 +10,13 @@ class DocumentResponse(BaseModel):
     title: str
     fileType: str
     status: str
-    fileSize: Optional[int] = None  # file size in bytes
+    fileSize: Optional[int] = None
     createdAt: datetime
 
 
 class DocumentCreateResponse(BaseModel):
     id: str
     message: str
-
-
-class DocumentCreate(BaseModel):
-    id: str
-    title: str
-    fileType: str
-    filePath: str
-    status: str
 
 
 # Summarization
@@ -41,7 +33,6 @@ class SummaryRequest(BaseModel):
 class SummaryStartResponse(BaseModel):
     message: str
     documentId: str
-    estimatedSeconds: Optional[int] = None
 
 
 class SummaryResponse(BaseModel):
@@ -55,4 +46,3 @@ class SummaryResponse(BaseModel):
 class SummaryRegenerateResponse(BaseModel):
     message: str
     documentId: str
-    estimatedSeconds: Optional[int] = None
