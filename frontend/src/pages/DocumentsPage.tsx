@@ -2,11 +2,21 @@ import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
-import { Upload, Trash2, Eye, FileText, Download, CloudUpload, X } from "lucide-react";
+import { Upload, Trash2, Eye, FileText, Download, CloudUpload, X, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import AppHeader from "@/components/AppHeader";
 import { fetchDocuments, deleteDocument, downloadDocumentFile, summarizeDocument, uploadDocument } from "@/lib/api";
@@ -14,10 +24,41 @@ import type { Document } from "@/lib/api";
 
 const ALLOWED = ["pdf", "docx", "txt"];
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatFileSize(bytes: number | null | undefined): string {
+  if (!bytes) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Skeleton row shown while loading
+function SkeletonRow() {
+  return (
+    <TableRow>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <TableCell key={i}>
+          <div className="h-4 bg-muted rounded animate-pulse" style={{ width: i === 1 ? "60%" : i === 5 ? "80%" : "40%" }} />
+        </TableCell>
+      ))}
+    </TableRow>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 const DocumentsPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showUpload, setShowUpload] = useState(false);
+
+  // Delete confirmation state
+  const [deleteTarget, setDeleteTarget] = useState<Document | null>(null);
 
   // Upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -47,6 +88,7 @@ const DocumentsPage = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
       toast.success("Document deleted");
+      setDeleteTarget(null);
     },
     onError: () => toast.error("Failed to delete document"),
   });
@@ -73,10 +115,17 @@ const DocumentsPage = () => {
       setTitle("");
       setShowUpload(false);
     },
-    onError: () => toast.error("Upload failed"),
+    onError: (error: Error) => {
+      // Show the actual backend error message instead of a generic one
+      try {
+        const parsed = JSON.parse(error.message);
+        toast.error(parsed.detail || "Upload failed");
+      } catch {
+        toast.error(error.message || "Upload failed");
+      }
+    },
   });
 
-  // Your backend returns createdAt (camelCase)
   const formatDate = (dateStr: string) => {
     try {
       const date = new Date(dateStr.endsWith("Z") ? dateStr : dateStr + "Z");
@@ -104,10 +153,28 @@ const DocumentsPage = () => {
         </div>
 
         <div className="flex gap-6 items-start">
-          {/* Left: Documents table */}
+
+          {/* Documents table */}
           <div className={`${showUpload ? "flex-1 min-w-0" : "w-full"}`}>
             {isLoading ? (
-              <div className="text-center py-20 text-muted-foreground">Loading documents...</div>
+              /* #3 — Loading skeleton */
+              <div className="rounded-xl border border-border overflow-hidden bg-card">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Title</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Size</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {[1, 2, 3].map((i) => <SkeletonRow key={i} />)}
+                  </TableBody>
+                </Table>
+              </div>
             ) : documents.length === 0 ? (
               <div className="text-center py-20 text-muted-foreground">
                 <FileText className="w-12 h-12 mx-auto mb-4 opacity-40" />
@@ -120,7 +187,9 @@ const DocumentsPage = () => {
                     <TableRow>
                       <TableHead className="font-semibold text-foreground">Title</TableHead>
                       <TableHead className="font-semibold text-foreground">Type</TableHead>
-                      <TableHead className="font-semibold text-foreground">Time</TableHead>
+                      {/* #1 — File size column */}
+                      <TableHead className="font-semibold text-foreground">Size</TableHead>
+                      <TableHead className="font-semibold text-foreground">Date</TableHead>
                       <TableHead className="font-semibold text-foreground">Status</TableHead>
                       <TableHead className="font-semibold text-foreground">Actions</TableHead>
                     </TableRow>
@@ -136,11 +205,13 @@ const DocumentsPage = () => {
                             {doc.title}
                           </button>
                         </TableCell>
-                        {/* backend returns fileType (camelCase) */}
                         <TableCell className="uppercase text-xs font-semibold text-muted-foreground">
                           {doc.fileType}
                         </TableCell>
-                        {/* backend returns createdAt (camelCase) */}
+                        {/* #1 — File size */}
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatFileSize(doc.fileSize)}
+                        </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {formatDate(doc.createdAt)}
                         </TableCell>
@@ -176,11 +247,11 @@ const DocumentsPage = () => {
                                 <Download className="w-3 h-3 mr-1" /> Download
                               </Button>
                             )}
+                            {/* #5 — Delete opens confirmation dialog */}
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => deleteMutation.mutate(doc.id)}
-                              disabled={deleteMutation.isPending}
+                              onClick={() => setDeleteTarget(doc)}
                               className="text-destructive border-destructive/30 hover:bg-destructive/10"
                             >
                               <Trash2 className="w-3 h-3 mr-1" /> Delete
@@ -195,12 +266,11 @@ const DocumentsPage = () => {
             )}
           </div>
 
-          {/* Right: Upload panel (toggled) */}
+          {/* Upload panel */}
           {showUpload && (
             <div className="w-80 shrink-0 rounded-2xl border border-border bg-card p-5 space-y-4">
               <h2 className="text-lg font-semibold text-foreground">Upload file</h2>
 
-              {/* Drop zone */}
               <div
                 className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
                   dragOver ? "border-primary bg-accent/40" : "border-border"
@@ -217,6 +287,7 @@ const DocumentsPage = () => {
                 <CloudUpload className="w-8 h-8 mx-auto mb-2 text-primary/40" />
                 <p className="text-sm text-muted-foreground">Drag & drop or</p>
                 <Button variant="outline" size="sm" type="button" className="mt-1">Browse</Button>
+                <p className="text-xs text-muted-foreground mt-2">PDF, DOCX, TXT · max 20MB</p>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -229,7 +300,7 @@ const DocumentsPage = () => {
               {file && (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent/30 text-sm">
                   <span className="flex-1 truncate font-medium">{file.name}</span>
-                  <span className="uppercase text-xs text-muted-foreground font-semibold">{getExt(file)}</span>
+                  <span className="text-xs text-muted-foreground">{formatFileSize(file.size)}</span>
                   <button onClick={() => setFile(null)} className="text-muted-foreground hover:text-foreground">
                     <X className="w-4 h-4" />
                   </button>
@@ -254,6 +325,32 @@ const DocumentsPage = () => {
           )}
         </div>
       </main>
+
+      {/* #5 — Delete confirmation dialog */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-destructive" />
+              Delete document
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <span className="font-semibold">"{deleteTarget?.title}"</span>?
+              This will also remove any generated summaries. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

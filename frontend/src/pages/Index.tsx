@@ -60,23 +60,16 @@ const Index = () => {
                 Upload your files and transform complex content into focused summaries
                 designed for smarter studying
               </p>
-              <Button
-                size="lg"
-                className="px-10 text-base font-semibold"
-                onClick={() => navigate("/documents")}
-              >
-                START
-              </Button>
             </div>
             {/* Illustration */}
             <div className="pt-4">
               <div className="w-full max-w-md h-48 rounded-lg flex items-center justify-center">
                 <img
-                src={heroImage}
-                alt=""
-                className="w-full max-w-lg"
-                style={{ mixBlendMode: "multiply" }}
-              />
+                  src={heroImage}
+                  alt=""
+                  className="w-full max-w-lg"
+                  style={{ mixBlendMode: "multiply" }}
+                />
               </div>
             </div>
           </div>
