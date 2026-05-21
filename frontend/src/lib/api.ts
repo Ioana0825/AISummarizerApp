@@ -24,8 +24,13 @@ export type SummaryType = "concise" | "detailed";
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = getToken();
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options?.headers,
+    },
     ...options,
   });
   if (!res.ok) {
@@ -195,4 +200,56 @@ export function streamSummary(
   })();
 
   return () => controller.abort();
+}
+
+// ─── Auth Types ───────────────────────────────────────────────────────────────
+
+export interface AuthToken {
+  access_token: string;
+  token_type: string;
+}
+
+// ─── Token helpers ────────────────────────────────────────────────────────────
+
+export function getToken(): string | null {
+  return localStorage.getItem("token");
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem("token", token);
+}
+
+export function removeToken(): void {
+  localStorage.removeItem("token");
+}
+
+export function isLoggedIn(): boolean {
+  const token = getToken();
+  return token !== null && token !== undefined && token !== "";
+}
+
+// ─── Auth API calls ───────────────────────────────────────────────────────────
+
+export async function registerUser(email: string, password: string): Promise<void> {
+  await apiFetch("/api/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function loginUser(email: string, password: string): Promise<void> {
+  const formData = new URLSearchParams();
+  formData.append("username", email);
+  formData.append("password", password);
+
+  const res = await fetch(`${BASE_URL}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: formData,
+  });
+
+  if (!res.ok) throw new Error("Invalid email or password");
+
+  const data: AuthToken = await res.json();
+  setToken(data.access_token);
 }
