@@ -57,8 +57,9 @@
   }
 }
 
+/* Single source of truth for indeterminate progress animation */
 @keyframes indeterminate {
-  0% { transform: translateX(-100%); width: 40%; }
-  50% { transform: translateX(60%); width: 60%; }
-  100% { transform: translateX(200%); width: 40%; }
+  0%   { transform: translateX(-100%) scaleX(0.3); }
+  50%  { transform: translateX(0%)    scaleX(0.7); }
+  100% { transform: translateX(100%) scaleX(0.3); }
 }

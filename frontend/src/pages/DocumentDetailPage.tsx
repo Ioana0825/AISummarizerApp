@@ -6,6 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import AppHeader from "@/components/AppHeader";
@@ -31,6 +36,18 @@ function splitWarningAndSummary(text: string): { warning: string | null; summary
 function hasRealContent(text: string): boolean {
   const { summary } = splitWarningAndSummary(text);
   return summary.trim().length > 0;
+}
+
+// Skeleton that mirrors the info bar layout
+function InfoBarSkeleton() {
+  return (
+    <div className="rounded-xl surface-highlight px-6 py-3 flex flex-wrap items-center gap-3 animate-pulse">
+      <div className="h-4 w-32 bg-muted rounded" />
+      <div className="h-4 w-10 bg-muted rounded" />
+      <div className="h-4 w-24 bg-muted rounded" />
+      <div className="h-6 w-16 bg-muted rounded-full ml-auto" />
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -94,7 +111,6 @@ const DocumentDetailPage = () => {
     enabled: !!id,
   });
 
-  // Fetch the summary for the currently selected type
   const {
     data: summary,
     isLoading: summaryLoading,
@@ -106,8 +122,16 @@ const DocumentDetailPage = () => {
     retry: false,
   });
 
-  // When the dropdown changes, clear any streamed content so the saved
-  // summary for the new type shows instead
+  // Update page title whenever the document loads
+  useEffect(() => {
+    if (doc?.title) {
+      document.title = `${doc.title} — Powerr`;
+    }
+    return () => {
+      document.title = "Powerr - AI Study Summarizer";
+    };
+  }, [doc?.title]);
+
   useEffect(() => {
     if (!summarizing) {
       setStreamedSummary("");
@@ -151,7 +175,7 @@ const DocumentDetailPage = () => {
     );
   };
 
-  // ── Mutations ─────────────────────────────────────────────────────────────
+  // ── Mutations ──────────────────────────────────────────────────────────────
 
   const summarizeMut = useMutation({
     mutationFn: () =>
@@ -212,14 +236,22 @@ const DocumentDetailPage = () => {
   };
 
   // ---------------------------------------------------------------------------
-  // Loading states
+  // Loading / not found states
   // ---------------------------------------------------------------------------
 
   if (docLoading) {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <AppHeader />
-        <div className="flex-1 flex items-center justify-center text-muted-foreground">Loading...</div>
+        <main className="flex-1 px-4 md:px-8 py-6 max-w-5xl mx-auto w-full space-y-6">
+          <div className="h-8 w-24 bg-muted rounded animate-pulse" />
+          <InfoBarSkeleton />
+          <div className="rounded-xl border border-border bg-card p-6 space-y-4 animate-pulse">
+            {[80, 60, 90, 50, 75].map((w, i) => (
+              <div key={i} className="h-4 bg-muted rounded" style={{ width: `${w}%` }} />
+            ))}
+          </div>
+        </main>
       </div>
     );
   }
@@ -228,7 +260,9 @@ const DocumentDetailPage = () => {
     return (
       <div className="min-h-screen bg-background flex flex-col">
         <AppHeader />
-        <div className="flex-1 flex items-center justify-center text-muted-foreground">Document not found</div>
+        <div className="flex-1 flex items-center justify-center text-muted-foreground">
+          Document not found
+        </div>
       </div>
     );
   }
@@ -249,9 +283,10 @@ const DocumentDetailPage = () => {
   const showSpinner = summarizing && !hasRealContent(streamedSummary);
   const showStreamingContent = summarizing && streamedSummary.length > 0;
 
-  // Has this specific type been generated before?
   const thisTypeExists = !summarizing && summary !== null;
   const thisTypeNotGenerated = !summarizing && !summaryLoading && summary === null;
+
+  const hasText = !!getRawText();
 
   // ---------------------------------------------------------------------------
   // Render
@@ -260,7 +295,7 @@ const DocumentDetailPage = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <AppHeader />
-      <main className="flex-1 px-8 py-6 max-w-5xl mx-auto w-full space-y-6">
+      <main className="flex-1 px-4 md:px-8 py-6 max-w-5xl mx-auto w-full space-y-6">
         <Button variant="ghost" onClick={() => navigate("/documents")} className="gap-1">
           <ChevronLeft className="w-4 h-4" /> Back
         </Button>
@@ -274,7 +309,7 @@ const DocumentDetailPage = () => {
             {summarizing ? "Summarizing..." : isSummarized ? "Summarized" : "Pending"}
           </Badge>
 
-          <div className="flex gap-2 ml-auto items-center">
+          <div className="flex gap-2 ml-auto items-center flex-wrap">
             <Select value={summaryType} onValueChange={(v) => setSummaryType(v as SummaryType)}>
               <SelectTrigger className="w-30 h-8 text-sm">
                 <SelectValue />
@@ -295,32 +330,50 @@ const DocumentDetailPage = () => {
               {summarizing ? "Generating..." : thisTypeExists ? "Regenerate" : "Summarize"}
             </Button>
 
-            <Button
-              size="icon" className="h-8 w-8" variant="outline"
-              onClick={() => setShowSummary((v) => !v)}
-              title={showSummary ? "Hide summary" : "View summary"}
-            >
-              {showSummary ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button
+                    size="icon" className="h-8 w-8" variant="outline"
+                    onClick={() => setShowSummary((v) => !v)}
+                  >
+                    {showSummary ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{showSummary ? "Hide summary" : "Show summary"}</TooltipContent>
+            </Tooltip>
 
-            <Button
-              size="icon" className="h-8 w-8" variant="outline"
-              onClick={() => downloadDocumentFile(doc.id).catch(() => toast.error("Download failed"))}
-              title="Download file"
-            >
-              <Download className="w-4 h-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button
+                    size="icon" className="h-8 w-8" variant="outline"
+                    onClick={() => downloadDocumentFile(doc.id).catch(() => toast.error("Download failed"))}
+                  >
+                    <Download className="w-4 h-4" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Download original file</TooltipContent>
+            </Tooltip>
 
-            <Button
-              size="icon"
-              className="h-8 w-8 text-destructive border-destructive/30 hover:bg-destructive/10"
-              variant="outline"
-              onClick={() => deleteMut.mutate()}
-              disabled={deleteMut.isPending}
-              title="Delete document"
-            >
-              <Trash2 className="w-4 h-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button
+                    size="icon"
+                    className="h-8 w-8 text-destructive border-destructive/30 hover:bg-destructive/10"
+                    variant="outline"
+                    onClick={() => deleteMut.mutate()}
+                    disabled={deleteMut.isPending}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Delete document</TooltipContent>
+            </Tooltip>
           </div>
         </div>
 
@@ -348,33 +401,58 @@ const DocumentDetailPage = () => {
 
             {/* Type indicator + action buttons */}
             <div className="flex flex-wrap items-center gap-2">
-              {/* Shows which type is currently displayed */}
               {!summarizing && thisTypeExists && (
                 <span className="text-xs font-medium px-2 py-1 rounded-full bg-primary/10 text-primary capitalize">
                   {summaryType} summary
                 </span>
               )}
               <div className="flex gap-2 ml-auto">
-                <Button size="sm" className="h-8 text-sm px-3" variant="outline" onClick={exportSummary}
-                  disabled={!getRawText()}>
-                  <Download className="w-3.5 h-3.5 mr-1" /> Export
-                </Button>
-                <Button size="sm" className="h-8 text-sm px-3" variant="outline" onClick={copySummary}
-                  disabled={!getRawText()}>
-                  <Copy className="w-3.5 h-3.5 mr-1" /> Copy
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button
+                        size="sm" className="h-8 text-sm px-3" variant="outline"
+                        onClick={exportSummary}
+                        disabled={!hasText}
+                      >
+                        <Download className="w-3.5 h-3.5 mr-1" /> Export
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {!hasText && (
+                    <TooltipContent>Generate a summary first</TooltipContent>
+                  )}
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button
+                        size="sm" className="h-8 text-sm px-3" variant="outline"
+                        onClick={copySummary}
+                        disabled={!hasText}
+                      >
+                        <Copy className="w-3.5 h-3.5 mr-1" /> Copy
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {!hasText && (
+                    <TooltipContent>Generate a summary first</TooltipContent>
+                  )}
+                </Tooltip>
               </div>
             </div>
 
-            {/* Warning banner */}
+            {/* Warning banner — uses design tokens instead of hardcoded amber */}
             {streamedWarning && (
-              <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                <span>{streamedWarning}</span>
+              <div className="flex items-start gap-2 rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+                <span>⚠️</span>
+                <span>{streamedWarning.replace(/^⚠️\s*/, "")}</span>
               </div>
             )}
 
-            {/* Summary scroll area */}
-            <ScrollArea className="rounded-xl border border-border bg-card p-6 h-[650px]">
+            {/* Summary scroll area — height fills available viewport */}
+            <ScrollArea className="rounded-xl border border-border bg-card p-6 h-[calc(100vh-340px)] min-h-[300px]">
               {showStreamingContent ? (
                 <p className="text-foreground whitespace-pre-wrap leading-relaxed">
                   {streamedContent}
@@ -416,11 +494,6 @@ const DocumentDetailPage = () => {
 
       <style>{`
         @keyframes blink { 50% { opacity: 0; } }
-        @keyframes indeterminate {
-          0% { transform: translateX(-100%) scaleX(0.3); }
-          50% { transform: translateX(0%) scaleX(0.7); }
-          100% { transform: translateX(100%) scaleX(0.3); }
-        }
       `}</style>
     </div>
   );

@@ -2,20 +2,18 @@ import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
-import { Upload, Trash2, Eye, FileText, Download, CloudUpload, X, AlertTriangle } from "lucide-react";
+import { DropdownMenu } from "radix-ui";
+import {
+  Upload, Trash2, Eye, FileText, Download,
+  CloudUpload, X, AlertTriangle, MoreVertical, Sparkles,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import AppHeader from "@/components/AppHeader";
@@ -35,13 +33,29 @@ function formatFileSize(bytes: number | null | undefined): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// Skeleton row shown while loading
+function FileTypeBadge({ type }: { type: string }) {
+  const styles: Record<string, string> = {
+    pdf:  "bg-blue-100 text-blue-700 border-blue-200",
+    docx: "bg-green-100 text-green-700 border-green-200",
+    txt:  "bg-gray-100 text-gray-600 border-gray-200",
+  };
+  const cls = styles[type?.toLowerCase()] ?? "bg-muted text-muted-foreground border-border";
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${cls}`}>
+      {type?.toUpperCase()}
+    </span>
+  );
+}
+
 function SkeletonRow() {
   return (
     <TableRow>
-      {[1, 2, 3, 4, 5].map((i) => (
+      {[1, 2, 3, 4, 5, 6].map((i) => (
         <TableCell key={i}>
-          <div className="h-4 bg-muted rounded animate-pulse" style={{ width: i === 1 ? "60%" : i === 5 ? "80%" : "40%" }} />
+          <div
+            className="h-4 bg-muted rounded animate-pulse"
+            style={{ width: i === 1 ? "60%" : i === 6 ? "80%" : "40%" }}
+          />
         </TableCell>
       ))}
     </TableRow>
@@ -49,18 +63,89 @@ function SkeletonRow() {
 }
 
 // ---------------------------------------------------------------------------
-// Component
+// Actions kebab menu
+// ---------------------------------------------------------------------------
+
+function ActionMenu({
+  doc,
+  onView,
+  onSummarize,
+  onDownload,
+  onDelete,
+  summarizePending,
+}: {
+  doc: Document;
+  onView: () => void;
+  onSummarize: () => void;
+  onDownload: () => void;
+  onDelete: () => void;
+  summarizePending: boolean;
+}) {
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Actions">
+          <MoreVertical className="w-4 h-4" />
+        </Button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={4}
+          className="z-50 min-w-[160px] rounded-xl border border-border bg-popover p-1 shadow-md animate-in fade-in-0 zoom-in-95"
+        >
+          <DropdownMenu.Item
+            onSelect={onView}
+            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-accent outline-none"
+          >
+            <Eye className="w-4 h-4 text-muted-foreground" />
+            View
+          </DropdownMenu.Item>
+
+          {doc.status === "pending" ? (
+            <DropdownMenu.Item
+              onSelect={onSummarize}
+              disabled={summarizePending}
+              className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-accent outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Sparkles className="w-4 h-4 text-muted-foreground" />
+              Summarize
+            </DropdownMenu.Item>
+          ) : (
+            <DropdownMenu.Item
+              onSelect={onDownload}
+              className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-accent outline-none"
+            >
+              <Download className="w-4 h-4 text-muted-foreground" />
+              Download
+            </DropdownMenu.Item>
+          )}
+
+          <DropdownMenu.Separator className="my-1 h-px bg-border" />
+
+          <DropdownMenu.Item
+            onSelect={onDelete}
+            className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg cursor-pointer hover:bg-destructive/10 text-destructive outline-none"
+          >
+            <Trash2 className="w-4 h-4" />
+            Delete
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main component
 // ---------------------------------------------------------------------------
 
 const DocumentsPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [showUpload, setShowUpload] = useState(false);
-
-  // Delete confirmation state
   const [deleteTarget, setDeleteTarget] = useState<Document | null>(null);
 
-  // Upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
@@ -116,7 +201,6 @@ const DocumentsPage = () => {
       setShowUpload(false);
     },
     onError: (error: Error) => {
-      // Show the actual backend error message instead of a generic one
       try {
         const parsed = JSON.parse(error.message);
         toast.error(parsed.detail || "Upload failed");
@@ -138,7 +222,7 @@ const DocumentsPage = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <AppHeader />
-      <main className="flex-1 px-8 py-6 max-w-7xl mx-auto w-full">
+      <main className="flex-1 px-4 md:px-8 py-6 max-w-7xl mx-auto w-full">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold text-foreground">My documents</h1>
           <Button
@@ -157,7 +241,6 @@ const DocumentsPage = () => {
           {/* Documents table */}
           <div className={`${showUpload ? "flex-1 min-w-0" : "w-full"}`}>
             {isLoading ? (
-              /* #3 — Loading skeleton */
               <div className="rounded-xl border border-border overflow-hidden bg-card">
                 <Table>
                   <TableHeader>
@@ -167,7 +250,7 @@ const DocumentsPage = () => {
                       <TableHead>Size</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableHead></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -178,7 +261,11 @@ const DocumentsPage = () => {
             ) : documents.length === 0 ? (
               <div className="text-center py-20 text-muted-foreground">
                 <FileText className="w-12 h-12 mx-auto mb-4 opacity-40" />
-                <p>No documents yet. Upload your first file!</p>
+                <p className="mb-4">No documents yet. Upload your first file!</p>
+                <Button onClick={() => setShowUpload(true)}>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Upload a file
+                </Button>
               </div>
             ) : (
               <div className="rounded-xl border border-border overflow-hidden bg-card">
@@ -187,28 +274,27 @@ const DocumentsPage = () => {
                     <TableRow>
                       <TableHead className="font-semibold text-foreground">Title</TableHead>
                       <TableHead className="font-semibold text-foreground">Type</TableHead>
-                      {/* #1 — File size column */}
                       <TableHead className="font-semibold text-foreground">Size</TableHead>
                       <TableHead className="font-semibold text-foreground">Date</TableHead>
                       <TableHead className="font-semibold text-foreground">Status</TableHead>
-                      <TableHead className="font-semibold text-foreground">Actions</TableHead>
+                      <TableHead className="w-12"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {documents.map((doc: Document) => (
-                      <TableRow key={doc.id}>
+                      <TableRow
+                        key={doc.id}
+                        className="cursor-pointer hover:bg-accent/30 transition-colors"
+                        onClick={() => navigate(`/documents/${doc.id}`)}
+                      >
                         <TableCell>
-                          <button
-                            onClick={() => navigate(`/documents/${doc.id}`)}
-                            className="text-primary hover:underline font-medium text-left"
-                          >
+                          <span className="text-primary font-medium hover:underline">
                             {doc.title}
-                          </button>
+                          </span>
                         </TableCell>
-                        <TableCell className="uppercase text-xs font-semibold text-muted-foreground">
-                          {doc.fileType}
+                        <TableCell>
+                          <FileTypeBadge type={doc.fileType} />
                         </TableCell>
-                        {/* #1 — File size */}
                         <TableCell className="text-sm text-muted-foreground">
                           {formatFileSize(doc.fileSize)}
                         </TableCell>
@@ -220,43 +306,17 @@ const DocumentsPage = () => {
                             {doc.status === "summarized" ? "Summarized" : "Pending"}
                           </Badge>
                         </TableCell>
-                        <TableCell>
-                          <div className="flex gap-2 flex-wrap">
-                            <Button size="sm" onClick={() => navigate(`/documents/${doc.id}`)}>
-                              <Eye className="w-3 h-3 mr-1" /> View
-                            </Button>
-                            {doc.status === "pending" ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => summarizeMutation.mutate(doc.id)}
-                                disabled={summarizeMutation.isPending}
-                              >
-                                Summarize
-                              </Button>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  downloadDocumentFile(doc.id).catch(() =>
-                                    toast.error("Download failed")
-                                  )
-                                }
-                              >
-                                <Download className="w-3 h-3 mr-1" /> Download
-                              </Button>
-                            )}
-                            {/* #5 — Delete opens confirmation dialog */}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setDeleteTarget(doc)}
-                              className="text-destructive border-destructive/30 hover:bg-destructive/10"
-                            >
-                              <Trash2 className="w-3 h-3 mr-1" /> Delete
-                            </Button>
-                          </div>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <ActionMenu
+                            doc={doc}
+                            onView={() => navigate(`/documents/${doc.id}`)}
+                            onSummarize={() => summarizeMutation.mutate(doc.id)}
+                            onDownload={() =>
+                              downloadDocumentFile(doc.id).catch(() => toast.error("Download failed"))
+                            }
+                            onDelete={() => setDeleteTarget(doc)}
+                            summarizePending={summarizeMutation.isPending}
+                          />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -272,8 +332,10 @@ const DocumentsPage = () => {
               <h2 className="text-lg font-semibold text-foreground">Upload file</h2>
 
               <div
-                className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
-                  dragOver ? "border-primary bg-accent/40" : "border-border"
+                className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
+                  dragOver
+                    ? "border-primary bg-accent/40 ring-2 ring-primary ring-offset-2"
+                    : "border-border hover:border-primary/50 hover:bg-accent/10"
                 }`}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                 onDragLeave={() => setDragOver(false)}
@@ -326,7 +388,7 @@ const DocumentsPage = () => {
         </div>
       </main>
 
-      {/* #5 — Delete confirmation dialog */}
+      {/* Delete confirmation dialog */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
