@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.formparsers import MultiPartParser
 from routes.documents import documents_router
+from routes.auth import auth_router
 
 # Increase multipart size limit to handle files up to 20MB
 MultiPartParser.max_size = 21 * 1024 * 1024
@@ -42,6 +43,7 @@ app.add_middleware(
 )
 
 app.include_router(documents_router, prefix="/api", tags=["documents"])
+app.include_router(auth_router, prefix="/api", tags=["auth"])
 
 if __name__ == "__main__":
     uvicorn.run(

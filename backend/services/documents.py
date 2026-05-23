@@ -251,9 +251,9 @@ def stream_summary_tokens(text: str, summary_type: str) -> Generator[str, None, 
         reduce_prompt = (
             "You are a university student writing study notes before an exam. "
             "Below are key points extracted from different sections of a document. "
-            "Combine them into 10-15 clear bullet points covering the most important concepts.\n\n"
             "Rules:\n"
-            "- Each bullet is 1-2 sentences with enough context to understand on its own\n"
+            "- Organize into 2-4 sections with clear topic headings\n"
+            "- Under each heading write 2-4 detailed bullet points explaining concepts as if teaching a classmate\n"
             "- Include specific names, dates, numbers, and terminology\n"
             "- Write in the SAME LANGUAGE as the notes below\n"
             "- Plain text only, absolutely no markdown formatting (no **, ##, *)\n"

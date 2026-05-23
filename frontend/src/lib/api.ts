@@ -198,33 +198,58 @@ export function streamSummary(
   return () => controller.abort();
 }
 
-// ─── Auth ──────────────────────────────────────────────────────────────────────
-// Stubs — replace with real session/token logic when auth is implemented.
+// ─── Auth Types ───────────────────────────────────────────────────────────────
 
-export async function isLoggedIn(): Promise<boolean> {
-  try {
-    await apiFetch("/api/auth/me");
-    return true;
-  } catch {
-    return false;
-  }
+export interface AuthToken {
+  access_token: string;
+  token_type: string;
 }
 
-export async function loginUser(email: string, password: string): Promise<void> {
-  await apiFetch("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
+// ─── Token helpers ────────────────────────────────────────────────────────────
+
+export function getToken(): string | null {
+  return localStorage.getItem("token");
 }
 
-export async function logoutUser(): Promise<void> {
-  await apiFetch("/api/auth/logout", { method: "POST" });
+export function setToken(token: string): void {
+  localStorage.setItem("token", token);
 }
+
+export function removeToken(): void {
+  localStorage.removeItem("token");
+}
+
+export function isLoggedIn(): boolean {
+  const token = getToken();
+  return token !== null && token !== "";
+}
+
+// ─── Auth API calls ───────────────────────────────────────────────────────────
+
 export async function registerUser(email: string, password: string): Promise<void> {
   await apiFetch("/api/auth/register", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
+}
+
+export async function loginUser(email: string, password: string): Promise<void> {
+  const formData = new URLSearchParams();
+  formData.append("username", email);
+  formData.append("password", password);
+
+  const res = await fetch(`${BASE_URL}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: formData,
+  });
+
+  if (!res.ok) throw new Error("Invalid email or password");
+
+  const data: AuthToken = await res.json();
+  setToken(data.access_token);
+}
+
+export async function logoutUser(): Promise<void> {
+  removeToken();
 }
